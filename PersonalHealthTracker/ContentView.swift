@@ -18,6 +18,8 @@ struct ContentView: View {
             ProfileView()
                 .tabItem { Label("Profile", systemImage: "person.fill")
                 }
+            AppsView()
+                           .tabItem { Label("Apps", systemImage: "square.grid.2x2") }
         }
     }
 }

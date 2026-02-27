@@ -7,5 +7,11 @@ struct PersonalTrackerApp: App {
         WindowGroup {
             ContentView()
         }
-        .modelContainer(for: [MealEntry.self, SupplementEntry.self, UserProfile.self])    }
+        .modelContainer(for: [
+            MealEntry.self,
+            SupplementEntry.self,
+            UserProfile.self,
+            AppOpenLog.self
+        ])
+    }
 }

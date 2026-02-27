@@ -8,41 +8,51 @@ import Observation
 final class HealthManager {
     private let store = HKHealthStore()
 
-    var stepsToday: Int? = nil
+    var stepsForSelectedDay: Int? = nil
     var isAuthorized: Bool = false
 
     var isHealthAvailable: Bool {
         HKHealthStore.isHealthDataAvailable()
     }
 
-    func requestAuthorizationAndFetchSteps() async {
+    func requestAuthorizationAndFetchSteps(for date: Date) async {
         guard isHealthAvailable else {
-            stepsToday = nil
+            stepsForSelectedDay = nil
             isAuthorized = false
             return
         }
 
         guard let stepType = HKObjectType.quantityType(forIdentifier: .stepCount) else {
-            stepsToday = nil
+            stepsForSelectedDay = nil
             return
         }
 
         do {
             try await store.requestAuthorization(toShare: [], read: [stepType])
             isAuthorized = true
-            await fetchStepsToday()
+            await fetchSteps(for: date)
         } catch {
             isAuthorized = false
-            stepsToday = nil
+            stepsForSelectedDay = nil
             print("Health authorization error:", error)
         }
     }
 
-    func fetchStepsToday() async {
+    func fetchSteps(for date: Date) async {
         guard let stepType = HKObjectType.quantityType(forIdentifier: .stepCount) else { return }
 
-        let startOfDay = Calendar.current.startOfDay(for: Date())
-        let predicate = HKQuery.predicateForSamples(withStart: startOfDay, end: Date(), options: .strictStartDate)
+        let cal = Calendar.current
+        let startOfDay = cal.startOfDay(for: date)
+        let endOfDay = cal.date(byAdding: .day, value: 1, to: startOfDay) ?? startOfDay.addingTimeInterval(86400)
+        let now = Date()
+
+        if startOfDay > now {
+            stepsForSelectedDay = nil
+            return
+        }
+
+        let queryEnd = min(endOfDay, now)
+        let predicate = HKQuery.predicateForSamples(withStart: startOfDay, end: queryEnd, options: .strictStartDate)
 
         let query = HKStatisticsQuery(quantityType: stepType,
                                       quantitySamplePredicate: predicate,
@@ -51,7 +61,7 @@ final class HealthManager {
 
             if let error {
                 print("Steps query error:", error)
-                Task { @MainActor in self.stepsToday = nil }
+                Task { @MainActor in self.stepsForSelectedDay = nil }
                 return
             }
 
@@ -59,7 +69,7 @@ final class HealthManager {
             let steps = sum?.doubleValue(for: HKUnit.count()) ?? 0
 
             Task { @MainActor in
-                self.stepsToday = Int(steps)
+                self.stepsForSelectedDay = Int(steps)
             }
         }
 

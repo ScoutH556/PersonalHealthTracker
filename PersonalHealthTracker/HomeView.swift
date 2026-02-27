@@ -30,7 +30,7 @@ struct HomeView: View {
 
                     // MARK: Steps (only meaningful for "today" with your current HealthManager)
                     Button {
-                        Task { await health.requestAuthorizationAndFetchSteps() }
+                        Task { await refreshStepsForSelectedDay() }
                     } label: {
                         metricCard(
                             title: "Steps",
@@ -87,8 +87,10 @@ struct HomeView: View {
             }
         }
         .task {
-            // Only fetch steps for today (your HealthManager is "today" scoped)
-            await health.requestAuthorizationAndFetchSteps()
+            await refreshStepsForSelectedDay()
+        }
+        .onChange(of: selectedDate) {
+            Task { await refreshStepsForSelectedDay() }
         }
     }
 
@@ -116,16 +118,14 @@ struct HomeView: View {
 
     // MARK: Steps display
     private var stepsText: String {
-        guard isSelectedDayToday else { return "—" }
-
         if !health.isHealthAvailable { return "Unavailable" }
         if !health.isAuthorized { return "Tap to enable" }
-        if let steps = health.stepsToday { return "\(steps)" }
+        if let steps = health.stepsForSelectedDay { return "\(steps)" }
         return "—"
     }
 
     private var stepsSubtitle: String {
-        isSelectedDayToday ? "today" : "only available for today"
+        isSelectedDayToday ? "today" : "for selected day"
     }
 
     // MARK: Meals (selected day)
@@ -244,6 +244,14 @@ struct HomeView: View {
     
     private var caffeineSubtitle: String {
         isSelectedDayToday ? "estimated right now" : "decayed to now"
+    }
+
+    private func refreshStepsForSelectedDay() async {
+        if health.isAuthorized {
+            await health.fetchSteps(for: selectedDate)
+        } else {
+            await health.requestAuthorizationAndFetchSteps(for: selectedDate)
+        }
     }
 
     // MARK: Card UI
