@@ -151,26 +151,26 @@ struct HomeView: View {
     }
 
     // MARK: Caffeine remaining
-    private var dayCaffeineDoses: [SupplementEntry] {
+    private var caffeineReferenceTime: Date {
+        if isSelectedDayToday { return Date() }
+        return min(dayRange.end, Date())
+    }
+
+    private var caffeineDosesForCalculation: [SupplementEntry] {
         supplements.filter {
-            isInSelectedDay($0.time) &&
+            $0.time <= caffeineReferenceTime &&
             $0.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "caffeine"
         }
     }
 
     private var caffeineRemainingNowMg: Double {
-        guard let p = profile else { return 0 }
-
-        // For past days, "remaining now" isn't super meaningful, but this still computes decay to the current time.
-        let halfLife = CaffeineCalculator.estimatedHalfLifeHours(profile: p)
-        let now = Date()
-
-        return dayCaffeineDoses.reduce(0) { sum, entry in
+        let now = caffeineReferenceTime
+        return caffeineDosesForCalculation.reduce(0) { sum, entry in
             sum + CaffeineCalculator.remainingAmountMg(
                 doseMg: entry.amount,
                 takenAt: entry.time,
                 now: now,
-                halfLifeHours: halfLife
+                halfLifeHours: effectiveCaffeineHalfLifeHours(for: entry)
             )
         }
     }
@@ -178,18 +178,16 @@ struct HomeView: View {
     private let caffeineZeroThresholdMg: Double = 1.0
 
     private var estimatedCaffeineZeroTime: Date? {
-        guard let p = profile else { return nil }
-        guard !dayCaffeineDoses.isEmpty else { return nil }
-
-        let halfLife = CaffeineCalculator.estimatedHalfLifeHours(profile: p)
-        let now = Date()
+        guard !caffeineDosesForCalculation.isEmpty else { return nil }
+        let now = caffeineReferenceTime
 
         // After ~10 half-lives, a dose is basically gone (<0.1%)
-        let lastDoseTime = dayCaffeineDoses.map(\.time).max() ?? now
-        let upperBound = lastDoseTime.addingTimeInterval(halfLife * 3600 * 10)
+        let maxHalfLife = caffeineDosesForCalculation.map { effectiveCaffeineHalfLifeHours(for: $0) }.max() ?? 5
+        let lastDoseTime = caffeineDosesForCalculation.map(\.time).max() ?? now
+        let upperBound = lastDoseTime.addingTimeInterval(maxHalfLife * 3600 * 10)
 
         // If it's already ~0, return now
-        if caffeineRemaining(at: now, halfLifeHours: halfLife) <= caffeineZeroThresholdMg {
+        if caffeineRemaining(at: now) <= caffeineZeroThresholdMg {
             return now
         }
 
@@ -199,20 +197,20 @@ struct HomeView: View {
 
         // Ensure hi is truly below threshold (expand if needed)
         var guardCount = 0
-        while caffeineRemaining(at: hi, halfLifeHours: halfLife) > caffeineZeroThresholdMg, guardCount < 10 {
-            hi = hi.addingTimeInterval(halfLife * 3600 * 5) // extend window
+        while caffeineRemaining(at: hi) > caffeineZeroThresholdMg, guardCount < 10 {
+            hi = hi.addingTimeInterval(maxHalfLife * 3600 * 5) // extend window
             guardCount += 1
         }
 
         // If still not below threshold, just give up safely
-        if caffeineRemaining(at: hi, halfLifeHours: halfLife) > caffeineZeroThresholdMg {
+        if caffeineRemaining(at: hi) > caffeineZeroThresholdMg {
             return nil
         }
 
         // 40 iterations is plenty precise (sub-second)
         for _ in 0..<40 {
             let mid = lo.addingTimeInterval(hi.timeIntervalSince(lo) / 2)
-            if caffeineRemaining(at: mid, halfLifeHours: halfLife) <= caffeineZeroThresholdMg {
+            if caffeineRemaining(at: mid) <= caffeineZeroThresholdMg {
                 hi = mid
             } else {
                 lo = mid
@@ -222,13 +220,13 @@ struct HomeView: View {
         return hi
     }
 
-    private func caffeineRemaining(at time: Date, halfLifeHours: Double) -> Double {
-        dayCaffeineDoses.reduce(0) { sum, entry in
+    private func caffeineRemaining(at time: Date) -> Double {
+        caffeineDosesForCalculation.reduce(0) { sum, entry in
             sum + CaffeineCalculator.remainingAmountMg(
                 doseMg: entry.amount,
                 takenAt: entry.time,
                 now: time,
-                halfLifeHours: halfLifeHours
+                halfLifeHours: effectiveCaffeineHalfLifeHours(for: entry)
             )
         }
     }
@@ -244,6 +242,11 @@ struct HomeView: View {
     
     private var caffeineSubtitle: String {
         isSelectedDayToday ? "estimated right now" : "decayed to now"
+    }
+
+    private func effectiveCaffeineHalfLifeHours(for entry: SupplementEntry) -> Double {
+        guard let profile else { return entry.halfLifeHours }
+        return CaffeineCalculator.estimatedHalfLifeHours(profile: profile)
     }
 
     private func refreshStepsForSelectedDay() async {
